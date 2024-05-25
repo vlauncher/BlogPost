@@ -15,42 +15,19 @@ class PostDetail(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = PostSerializer
 
 
-import hmac
-import hashlib
-import json
-import requests
-from django.conf import settings
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-from .models import Post
+from django.http import HttpResponse
 from .services import fetch_github_raw_text
 
-@csrf_exempt
 def github_webhook(request):
     if request.method == 'POST':
-        signature = request.headers.get('X-Hub-Signature-256')
-        if signature is None:
-            return JsonResponse({'error': 'Missing signature'}, status=400)
-        
-        sha_name, signature = signature.split('=')
-        if sha_name != 'sha256':
-            return JsonResponse({'error': 'Invalid signature format'}, status=400)
-
-        mac = hmac.new(
-            settings.GITHUB_WEBHOOK_SECRET.encode('utf-8'),
-            msg=request.body,
-            digestmod=hashlib.sha256
-        )
-
-        if not hmac.compare_digest(mac.hexdigest(), signature):
-            return JsonResponse({'error': 'Invalid signature'}, status=400)
-        
-        payload = json.loads(request.body)
-        if payload.get('ref') == 'refs/heads/main':  # Change this to your branch if different
+        payload = request.body
+        event = request.headers.get('X-GitHub-Event')
+        if event == 'push':
+            # Update all posts overview with the fetch_github service
             for post in Post.objects.all():
-                if post.post_url:
-                    post.overview = fetch_github_raw_text(post.post_url)
+                raw_text = fetch_github_raw_text(post.github_url)
+                if raw_text:
+                    post.overview = raw_text[:200]  # Update the overview with the first 200 characters of the raw text
                     post.save()
-        
-        return JsonResponse({'status': 'success'})
-    return JsonResponse({'error': 'Invalid request method'}, status=405)
+        return HttpResponse('Webhook received')
+    return HttpResponse('Invalid request')
