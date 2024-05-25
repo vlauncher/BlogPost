@@ -15,19 +15,43 @@ class PostDetail(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = PostSerializer
 
 
-from django.http import HttpResponse
+# views.py
+import hmac
+import hashlib
+import json
+from django.conf import settings
+from django.http import JsonResponse, HttpResponseBadRequest
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from .models import Post
+from .serializers import PostSerializer
 from .services import fetch_github_raw_text
 
-def github_webhook(request):
-    if request.method == 'POST':
-        payload = request.body
+class GitHubWebhookView(APIView):
+    def post(self, request, *args, **kwargs):
+        secret = settings.GITHUB_WEBHOOK_SECRET
+        signature = request.headers.get('X-Hub-Signature-256')
+        
+        if not verify_github_signature(secret, signature, request.body):
+            return Response({"detail": "Invalid signature"}, status=status.HTTP_400_BAD_REQUEST)
+
         event = request.headers.get('X-GitHub-Event')
-        if event == 'push':
-            # Update all posts overview with the fetch_github service
-            for post in Post.objects.all():
-                raw_text = fetch_github_raw_text(post.github_url)
-                if raw_text:
-                    post.overview = raw_text[:200]  # Update the overview with the first 200 characters of the raw text
-                    post.save()
-        return HttpResponse('Webhook received')
-    return HttpResponse('Invalid request')
+        if event == "push":
+            update_all_post_overviews()
+            return Response({"status": "success"}, status=status.HTTP_200_OK)
+        
+        return Response({"detail": "Invalid request"}, status=status.HTTP_400_BAD_REQUEST)
+
+def verify_github_signature(secret, signature, payload):
+    hash_obj = hmac.new(secret.encode(), payload, hashlib.sha256)
+    expected_signature = f"sha256={hash_obj.hexdigest()}"
+    return hmac.compare_digest(expected_signature, signature)
+
+def update_all_post_overviews():
+    posts = Post.objects.all()
+    for post in posts:
+        if post.post_url:
+            post.overview = fetch_github_raw_text(post.post_url)
+            post.save()
+
