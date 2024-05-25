@@ -16,6 +16,9 @@ class PostDetail(generics.RetrieveUpdateDestroyAPIView):
 
 import json
 import logging
+import hmac
+import hashlib
+from django.conf import settings
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from .models import Post
@@ -27,6 +30,20 @@ logger = logging.getLogger(__name__)
 @csrf_exempt
 def github_webhook(request):
     if request.method == "POST":
+        secret = settings.GITHUB_WEBHOOK_SECRET
+        signature = request.META.get('HTTP_X_HUB_SIGNATURE_256')
+        if not signature:
+            return JsonResponse({'error': 'Missing signature'}, status=400)
+
+        # Verify the signature
+        sha_name, signature = signature.split('=')
+        if sha_name != 'sha256':
+            return JsonResponse({'error': 'Unsupported signature type'}, status=400)
+
+        mac = hmac.new(secret.encode(), msg=request.body, digestmod=hashlib.sha256)
+        if not hmac.compare_digest(mac.hexdigest(), signature):
+            return JsonResponse({'error': 'Invalid signature'}, status=400)
+
         try:
             payload = json.loads(request.body.decode('utf-8'))
             logger.info(f"Received payload: {payload}")
