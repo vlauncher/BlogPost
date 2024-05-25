@@ -1,1 +1,1 @@
-Thats the shit aint it the truth
+Thats the shit aint it the truth i talk am
